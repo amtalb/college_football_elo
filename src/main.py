@@ -22,7 +22,7 @@ def draw_header():
 
 def draw_intro():
     st.write(
-        """This is a my attempt to bring Elo rankings to College Football. 
+        """This is my attempt to bring Elo rankings to College Football. 
         I have never been a fan of how college football chooses its champions. 
         From the days of split national titles, to the BCS, and even the Playoff, 
         the whole process seems very opaque unfair to the 'have-nots' of the 
