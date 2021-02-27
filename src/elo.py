@@ -6,11 +6,11 @@ import data
 def set_fcs(teams, games):
     for g_index, game in games.iterrows():
         if game.home_id not in teams.index:
-            games.at[g_index, "home_id"] = 9999
-            games.at[g_index, "school"] = "FCS"
+            games.loc[games["id"] == game.id, "home_id"] = 9999
+            games.loc[games["id"] == game.id, "home_team"] = "FCS"
         if game.away_id not in teams.index:
-            games.at[g_index, "away_id"] = 9999
-            games.at[g_index, "school"] = "FCS"
+            games.loc[games["id"] == game.id, "away_id"] = 9999
+            games.loc[games["id"] == game.id, "away_team"] = "FCS"
 
     return teams
 
@@ -127,7 +127,10 @@ def weight_by_recruiting(teams_df):
 def get_elo_rankings(
     season="all", conference=False, recruiting=False, margin_of_victory=False
 ):
-    teams_df = data.load_teams()
+    if season == "all":
+        teams_df = data.load_teams()
+    else:
+        teams_df = data.load_teams(season)
 
     if season == "all":
         season_list = range(2010, 2021)
@@ -152,9 +155,11 @@ def get_elo_rankings(
 
         elo_rankings_df["Elo"] = elo_col
 
-        for i in range(16):
+        weeks = games_df.week.unique()
+
+        for i in weeks:
             elo_rankings_df = process_week_games(
-                elo_rankings_df, games_df[games_df.week == i + 1], margin_of_victory
+                elo_rankings_df, games_df[games_df.week == i], margin_of_victory
             )
 
         # revert elo towards the mean

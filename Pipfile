@@ -6,9 +6,7 @@ name = "pypi"
 [packages]
 pandas = "*"
 streamlit = "*"
-flake8 = "*"
-isort = "*"
-black = "*"
+requests = "*"
 
 [dev-packages]
 

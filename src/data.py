@@ -1,13 +1,20 @@
+import json
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import requests
 
-path = Path(__file__).parent
+URL = "https://api.collegefootballdata.com/"
+CURRENT_SEASON = "2020"
 
 
-def load_teams():
-    teams_df = pd.read_csv(path / "../data/teams.csv")
+def load_teams(season=CURRENT_SEASON):
+    team_endpoint = "teams/fbs"
+    params = {"year": season}
+    res = requests.request("GET", URL + team_endpoint, params=params)
+    teams_df = pd.json_normalize(res.json())
+
     teams_df.drop(
         [
             "mascot",
@@ -18,8 +25,7 @@ def load_teams():
             "division",
             "color",
             "alt_color",
-            "logos[0]",
-            "logos[1]",
+            "logos",
         ],
         axis=1,
         inplace=True,
@@ -44,7 +50,7 @@ def load_teams():
 
     teams_df.columns = ["ID", "School", "Conference", "Wins", "Losses", "Elo"]
 
-    rankings_df = load_rankings()
+    rankings_df = load_rankings(season=season)
 
     # merge rankings df to get CFP actual ranks
     teams_df = teams_df.merge(rankings_df, how="left", on="School")
@@ -54,17 +60,23 @@ def load_teams():
     # conversion shenanigans
     # this is to represent unranked teams as "NR"
     teams_df = teams_df.replace(np.nan, 0)
-    teams_df["CFP Ranking"] = teams_df["CFP Ranking"].astype(int).astype(str)
+    teams_df["AP Ranking"] = teams_df["AP Ranking"].astype(int).astype(str)
     teams_df = teams_df.replace("0", "NR")
 
     return teams_df
 
 
-def load_rankings():
-    rankings_df = pd.read_csv(path / "../data/rankings.csv")
+def load_rankings(season=CURRENT_SEASON):
+    params = {"year": season, "seasonType": "postseason"}
+    endpoint = "rankings"
+    r = requests.request("GET", URL + endpoint, params=params)
+    rankings_df = pd.json_normalize(
+        r.json(),
+        record_path=["polls", "ranks"],
+        meta=["season", "seasonType", "week", ["polls", "poll"]],
+    )
 
-    rankings_df = rankings_df[rankings_df["week"] == 16]
-    rankings_df = rankings_df[rankings_df["poll"] == "Playoff Committee Rankings"]
+    rankings_df = rankings_df[rankings_df["polls.poll"] == "AP Top 25"]
 
     rankings_df.drop(
         [
@@ -73,65 +85,68 @@ def load_rankings():
             "season",
             "seasonType",
             "week",
-            "poll",
+            "polls.poll",
             "points",
         ],
         axis=1,
         inplace=True,
     )
 
-    rankings_df.columns = ["CFP Ranking", "School"]
+    rankings_df.columns = ["AP Ranking", "School"]
 
     return rankings_df
 
 
-def load_games(season):
+def load_games(season=CURRENT_SEASON):
     games_df = pd.DataFrame()
 
-    season_path = "../data/games" + str(season) + ".csv"
-    games_df = pd.read_csv(path / season_path)
+    for seasonType in ["regular", "postseason"]:
+        params = {"year": season, "seasonType": seasonType}
+        endpoint = "games"
+        r = requests.request("GET", URL + endpoint, params=params)
+        df = pd.json_normalize(r.json())
 
-    games_df.drop(
-        [
-            "start_date",
-            "start_time_tbd",
-            "neutral_site",
-            "attendance",
-            "venue_id",
-            "venue",
-            "home_conference",
-            "away_conference",
-            "home_line_scores[0]",
-            "home_line_scores[1]",
-            "home_line_scores[2]",
-            "home_line_scores[3]",
-            "home_post_win_prob",
-            "away_line_scores[0]",
-            "away_line_scores[1]",
-            "away_line_scores[2]",
-            "away_line_scores[3]",
-            "away_post_win_prob",
-            "excitement_index",
-            "mascot",
-            "abbreviation",
-            "conference",
-        ],
-        axis=1,
-        inplace=True,
-        errors="ignore",
-    )
+        df.drop(
+            [
+                "start_date",
+                "start_time_tbd",
+                "neutral_site",
+                "attendance",
+                "venue_id",
+                "venue",
+                "home_conference",
+                "away_conference",
+                "home_line_scores",
+                "home_post_win_prob",
+                "away_line_scores",
+                "away_post_win_prob",
+                "excitement_index",
+                "mascot",
+                "abbreviation",
+                "conference",
+            ],
+            axis=1,
+            inplace=True,
+            errors="ignore",
+        )
+        if seasonType == "postseason":
+            df["week"] += games_df.week.max()
+
+        games_df = pd.concat([games_df, df], axis=0)
 
     games_df.dropna(inplace=True)
 
     return games_df
 
 
-def load_recruiting():
-    recruit_df = pd.read_csv(path / "../data/recruiting2016.csv")
+def load_recruiting(season=CURRENT_SEASON):
+    recruit_df = pd.DataFrame()
 
-    for season in range(2017, 2021):
-        season_path = "../data/recruiting" + str(season) + ".csv"
-        df = pd.read_csv(path / season_path)
+    for season in range(int(season) - 4, int(season) + 1):
+        params = {"year": season}
+        endpoint = "recruiting/teams"
+        r = requests.request("GET", URL + endpoint, params=params)
+        df = pd.json_normalize(r.json())
 
         recruit_df = pd.concat([recruit_df, df])
 
@@ -145,6 +160,10 @@ def load_recruiting():
         errors="ignore",
     )
 
+    # convert points column to numeric
+    recruit_df["points"] = pd.to_numeric(recruit_df["points"])
+
+    # average recruiting score over the previous 5 seasons
     recruit_df = recruit_df.groupby(["team"]).mean()
 
     return recruit_df
