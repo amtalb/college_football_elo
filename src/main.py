@@ -1,7 +1,8 @@
+from datetime import datetime
+
 import streamlit as st
 
 import elo
-import SessionState
 
 
 def get_ranking(df):
@@ -13,6 +14,15 @@ def get_ranking(df):
     df.reset_index(drop=True, inplace=True)
     df.index += 1
     return df.head(25)
+
+
+def set_page_config():
+    st.set_page_config(
+        page_title="College Football Elo Rankings",
+        page_icon="🏈",
+        layout="centered",
+        initial_sidebar_state="auto",
+    )
 
 
 def draw_header():
@@ -53,199 +63,161 @@ def draw_intro():
     st.write("https://github.com/amtalb/college_football_elo")
 
 
-def main():
-    st.set_page_config(
-        page_title="College Football Elo Rankings",
-        page_icon="🏈",
-        layout="centered",
-        initial_sidebar_state="auto",
-    )
-    draw_header()
+def get_true_key(dictionary):
+    for key, value in dictionary.items():
+        if value is True:
+            return key
+    return None
 
-    session_state = SessionState.get(but="")
 
-    reg_elo = st.sidebar.button("Elo")
-    cum_elo = st.sidebar.button("Cumulative")
-    mov_elo = st.sidebar.button("Margin of Victory")
-    recruit_elo = st.sidebar.button("Recruiting")
-    conf_elo = st.sidebar.button("Conferences")
+def get_last_ten_years_as_str() -> list[str]:
+    return [str(x) for x in range(datetime.now().year - 10, datetime.now().year)]
 
-    if reg_elo:
-        session_state.but = "reg_elo"
-    elif cum_elo:
-        session_state.but = "cum_elo"
-    elif mov_elo:
-        session_state.but = "mov_elo"
-    elif recruit_elo:
-        session_state.but = "recruit_elo"
-    elif conf_elo:
-        session_state.but = "conf_elo"
 
-    if session_state.but == "reg_elo":
-        st.subheader("Regular Elo Ratings")
-        season = st.selectbox(
-            "Season",
-            (
-                "2020",
-                "2019",
-                "2018",
-                "2017",
-                "2016",
-                "2015",
-                "2014",
-                "2013",
-                "2012",
-                "2011",
-                "2010",
-            ),
-        )
+def draw_page():
+    if "sb_page" in st.session_state:
+        match st.session_state["sb_page"]:
+            case "reg":
+                subheader = "Regular Elo Ratings"
+                season_box = True
+                margin_of_victory = False
+                recruiting = False
+                conference = False
+                methodology_string = """
+                    The original Elo ranking system taken straight from Wikipedia. Each team in
+                    the contest has an expected outcome calculated as follows:\n
+                    \t1 / (1 + 10 ^ ( (away_elo - home_elo) / 400 ))\n
+                    The expected outcome is then compared to the actual outcome (1 for a win, 0
+                    for a loss) and multiplied by a constant $K$, which in this case is 50. The resulting
+                    value is the team's net Elo, which will be positive or negative based on whether
+                    they won or lost.
+                """
+                data_from_string = "Data from https://www.collegefootballdata.com/"
+            case "cum":
+                subheader = "Cumulative Elo Ratings"
+                season_box = False
+                methodology_string = """
+                    This ranking system is almost exactly the same as the regular Elo ranking system
+                    except a team's Elo carries over, year over year. However, at the end of the season,
+                    a teams Elo is "reset" by regressing 70% of the way to the mean. This is to ensure that
+                    past successes aren't an excuse for a bad current season.
+                """
+                data_from_string = (
+                    "Data from https://www.collegefootballdata.com/exporter/"
+                )
+            case "mov":
+                subheader = "Margin-of-victory Elo Ratings"
+                season_box = True
+                margin_of_victory = True
+                recruiting = False
+                conference = False
+                methodology_string = """
+                    Elos are adjusted based on the margin of victory of the game. When a team wins
+                    by blowout, they earn more points, on a diminishing scale. the margin of
+                    victory is used to calculate a multiplier that affects the team's new Elo. The
+                    multiplier formula is as follows:\n
+                    \tln(margin_of_victory + 1) * 2.2 / (difference_in_elo * 0.001 + 2.2)\n
+                    Taken from 538: https://fivethirtyeight.com/methodology/how-our-nfl-predictions-work/
+                """
+                data_from_string = "Data from https://www.collegefootballdata.com/"
+            case "recruit":
+                subheader = "Elo Ratings weighted by recruiting class rank"
+                season_box = True
+                margin_of_victory = False
+                recruiting = True
+                conference = False
+                methodology_string = """
+                    Each team's starting Elo is modified based on their average
+                    recruiting score for the past 5 seasons. This average is then halved and added/subtracted
+                    from a base of 1500 to set starting Elo scores.
+                """
+                data_from_string = "Data from https://www.collegefootballdata.com/"
+            case "conf":
+                subheader = "Conference-weighted Elo Ratings"
+                season_box = True
+                margin_of_victory = False
+                recruiting = False
+                conference = True
+                methodology_string = """
+                    Conference weights are completely mine and completely arbitrary.
+                    I roughly based them on how teams did in the 2019/2020 bowl season.
+                    See conference starting Elo's below  and, believe me, it hurt me just
+                    as much to add to the echo chamber of the SEC being the best:
+                        - ACC: 1510
+                        - AAC: 1475
+                        - Big 10: 1540
+                        - Big 12: 1535
+                        - Conference USA: 1460
+                        - FBS Independents: 1500
+                        - Mid American: 1450
+                        - Mountain West: 1460
+                        - Pac 12: 1510
+                        - SEC: 1550
+                        - Sun Belt: 1480
+                """
+                data_from_string = "Data from https://www.collegefootballdata.com/"
 
-        st.table(get_ranking(elo.get_elo_rankings(season=season)))
-        expander = st.beta_expander("Methodology")
-        expander.write(
-            """The original Elo ranking system taken straight from Wikipedia. Each team in
-            the contest has an expected outcome calculated as follows:"""
-        )
-        expander.latex(
-            r"\frac{1}{1 + (10^{\frac{away \space elo - home \space elo}{400})}}"
-        )
-        expander.write(
-            """The expected outcome is then compared to the actual outcome (1 for a win, 0
-            for a loss) and multiplied by a constant $K$, which in this case is 50. The resulting
-            value is the team's net Elo, which will be positive or negative based on whether
-            they won or lost."""
-        )
-        expander.write("Data from https://www.collegefootballdata.com/")
+        st.subheader(subheader)
 
-    elif session_state.but == "cum_elo":
-        st.subheader("Cumulative Elo Ratings")
-        session_state.but = "cum_elo"
-        st.text("Seasons 2010-2020")
+        if season_box:
+            season = st.selectbox("Season", get_last_ten_years_as_str())
 
-        with st.spinner("Crunching some numbers..."):
-            st.table(get_ranking(elo.get_elo_rankings(season="all")))
+            with st.spinner("Crunching some numbers..."):
+                st.table(
+                    get_ranking(
+                        elo.get_elo_rankings(
+                            season=season,
+                            margin_of_victory=margin_of_victory,
+                            recruiting=recruiting,
+                            conference=conference,
+                        )
+                    )
+                )
+        else:
+            st.text(f"Seasons {datetime.now().year - 10}-{datetime.now().year - 1}")
+            with st.spinner("Crunching some numbers..."):
+                st.table(get_ranking(elo.get_elo_rankings(season="all")))
 
-        expander = st.beta_expander("Methodology")
-        expander.write(
-            """This ranking system is almost exactly the same as the regular Elo ranking system
-            except a team's Elo carries over, year over year. However, at the end of the season,
-            a teams Elo is "reset" by regressing 70% of the way to the mean. This is to ensure that
-            past successes aren't an excuse for a bad current season."""
-        )
-        expander.write("Data from https://www.collegefootballdata.com/exporter/")
-
-    elif session_state.but == "mov_elo":
-        st.subheader("Margin-of-victory Elo Ratings")
-        season = st.selectbox(
-            "Season",
-            (
-                "2020",
-                "2019",
-                "2018",
-                "2017",
-                "2016",
-                "2015",
-                "2014",
-                "2013",
-                "2012",
-                "2011",
-                "2010",
-            ),
-        )
-        st.table(
-            get_ranking(elo.get_elo_rankings(season=season, margin_of_victory=True))
-        )
-        expander = st.beta_expander("Methodology")
-        expander.write(
-            """
-            Elos are adjusted based on the margin of victory of the game. When a team wins
-            by blowout, they earn more points, on a diminishing scale. the margin of 
-            victory is used to calculate a multiplier that affects the team's new Elo. The 
-            multiplier formula is as follows:"""
-        )
-        expander.latex(
-            r"\ln(margin \space of \space victory + 1) * \frac{2.2}{difference \space in \space elo * 0.001 + 2.2}"
-        )
-        expander.write(
-            "Taken from 538: https://fivethirtyeight.com/methodology/how-our-nfl-predictions-work/"
-        )
+        expander = st.expander("Methodology")
+        expander.write(methodology_string)
         expander.write("")
-        expander.write("Data from https://www.collegefootballdata.com/")
+        expander.write(data_from_string)
 
-    elif session_state.but == "recruit_elo":
-        st.subheader("Elo Ratings weighted by recruiting class rank")
-        season = st.selectbox(
-            "Season",
-            (
-                "2020",
-                "2019",
-                "2018",
-                "2017",
-                "2016",
-                "2015",
-                "2014",
-                "2013",
-                "2012",
-                "2011",
-                "2010",
-            ),
-        )
-
-        st.table(get_ranking(elo.get_elo_rankings(season=season, recruiting=True)))
-        expander = st.beta_expander("Methodology")
-        expander.write(
-            """Each team's starting Elo is modified based on their average 
-            recruiting score for the past 5 seasons. This average is then halved and added/subtracted
-            from a base of 1500 to set starting Elo scores."""
-        )
-        expander.write("")
-        expander.write("Data from https://www.collegefootballdata.com/")
-
-    elif session_state.but == "conf_elo":
-        st.subheader("Conference-weighted Elo Ratings")
-        season = st.selectbox(
-            "Season",
-            (
-                "2020",
-                "2019",
-                "2018",
-                "2017",
-                "2016",
-                "2015",
-                "2014",
-                "2013",
-                "2012",
-                "2011",
-                "2010",
-            ),
-        )
-        st.table(get_ranking(elo.get_elo_rankings(season=season, conference=True)))
-        expander = st.beta_expander("Methodology")
-        expander.write(
-            """Conference weights are completely mine and completely arbitrary. 
-            I roughly based them on how teams did in the 2019/2020 bowl season. 
-            See conference starting Elo's below  and, believe me, it hurt me just
-            as much to add to the echo chamber of the SEC being the best:"""
-        )
-        expander.write(
-            """
-            - ACC: 1510
-            - AAC: 1475
-            - Big 10: 1540
-            - Big 12: 1535
-            - Conference USA: 1460
-            - FBS Independents: 1500
-            - Mid American: 1450
-            - Mountain West: 1460
-            - Pac 12: 1510
-            - SEC: 1550
-            - Sun Belt: 1480
-            """
-        )
-        expander.write("")
-        expander.write("Data from https://www.collegefootballdata.com/")
     else:
         draw_intro()
+
+
+def main():
+    # set up page
+    set_page_config()
+
+    # add header
+    draw_header()
+
+    # add sidebar
+    reg = st.sidebar.button("Elo")
+    cum = st.sidebar.button("Cumulative")
+    mov = st.sidebar.button("Margin of Victory")
+    recruit = st.sidebar.button("Recruiting")
+    conf = st.sidebar.button("Conferences")
+
+    # update state to represent selected sidebar tab
+    if reg:
+        st.session_state["sb_page"] = "reg"
+    elif cum:
+        st.session_state["sb_page"] = "cum"
+    elif mov:
+        st.session_state["sb_page"] = "mov"
+    elif recruit:
+        st.session_state["sb_page"] = "recruit"
+    elif conf:
+        st.session_state["sb_page"] = "conf"
+
+    if "sb_page" in st.session_state:
+        print(st.session_state["sb_page"])
+
+    # add the main page contents depending on sidebar state
+    draw_page()
 
 
 if __name__ == "__main__":

@@ -1,9 +1,23 @@
 import math
+from datetime import datetime
+
+from pandas import DataFrame, Series
 
 import data
 
 
-def set_fcs(teams, games):
+def set_fcs(teams: DataFrame, games: DataFrame) -> DataFrame:
+    """
+    Replace all FCS opponents with a placeholder value in the teams df
+
+    Parameters:
+        teams: DataFrame
+            a df of all teams
+        games: DataFrame
+            a df of all games
+    Returns:
+        the teams df updated so all FCS opponents are replaced by the FCS placeholder
+    """
     for g_index, game in games.iterrows():
         if game.home_id not in teams.index:
             games.loc[games["id"] == game.id, "home_id"] = 9999
@@ -15,7 +29,22 @@ def set_fcs(teams, games):
     return teams
 
 
-def process_week_games(teams, week_games, margin_of_victory=False):
+def process_week_games(
+    teams: DataFrame, week_games: DataFrame, margin_of_victory: bool = False
+) -> DataFrame:
+    """
+    Process all the games in a week and update elo accordingly
+
+    Parameters:
+        teams: DataFrame
+            a df containing all teams
+        week_games: DataFrame
+            a df containing all games played in the week
+        margin_of_victory: bool = False
+            optionally weight elo by margin of victory
+    Returns:
+        a df of all teams with elo updated according to the week's games
+    """
     for g_index, game in week_games.iterrows():
         # home team win
         if game.home_points > game.away_points:
@@ -52,7 +81,31 @@ def process_week_games(teams, week_games, margin_of_victory=False):
     return teams
 
 
-def update_elo(teams, home, away, margin_of_victory=0, winner=None):
+def update_elo(
+    teams: DataFrame,
+    home: str,
+    away: str,
+    margin_of_victory: int = 0,
+    winner: str = None,
+) -> DataFrame:
+    """
+    Process a game and update elo according to the results
+
+    Parameters:
+        teams: DataFrame
+            a DataFrame of all teams
+        home: str
+            the home team
+        away: str
+            the away team
+        margin_of_victory: int = 0
+            how much the winning team won by
+        winner: str = None
+            The winning team name
+    Returns:
+        A DataFrame with elos updated according to game results
+
+    """
     K = 50
 
     home_elo = teams.at[home, "Elo"]
@@ -89,7 +142,17 @@ def update_elo(teams, home, away, margin_of_victory=0, winner=None):
     return teams
 
 
-def weight_by_conference(teams_df):
+def weight_by_conference(teams_df: DataFrame) -> DataFrame:
+    """
+    Weights the DataFrame elo by conference ranks
+
+    Parameters:
+        teams_df: DataFrame
+            The DataFrame to weight
+
+    Returns:
+        The weighted DataFrame
+    """
     df = teams_df.copy()
 
     df.loc[df["Conference"] == "ACC", "Elo"] = 1510
@@ -107,7 +170,17 @@ def weight_by_conference(teams_df):
     return df
 
 
-def weight_by_recruiting(teams_df):
+def weight_by_recruiting(teams_df: DataFrame) -> DataFrame:
+    """
+    Weights the DataFrame elo by recruiting ranks
+
+    Parameters:
+        teams_df: DataFrame
+            The DataFrame to weight
+
+    Returns:
+        The weighted DataFrame
+    """
     df = teams_df.copy()
 
     recruit_df = data.load_recruiting()
@@ -124,24 +197,78 @@ def weight_by_recruiting(teams_df):
     return df
 
 
-def get_elo_rankings(
-    season="all", conference=False, recruiting=False, margin_of_victory=False
-):
+def build_teams_df(season: str, conference: bool, recruiting: bool) -> DataFrame:
+    """
+    Build a DataFrame of all teams
+
+    Parameters:
+        season: str
+            The season to generate teams from
+        conference: bool
+            Optionally weight elo by conference strength
+        recruiting: bool
+            Optionally weight elo by recruiting strength
+
+    Returns:
+        A DataFrame containing all teams
+    """
     if season == "all":
         teams_df = data.load_teams()
     else:
         teams_df = data.load_teams(season)
-
-    if season == "all":
-        season_list = range(2010, 2021)
-    else:
-        season_list = [int(season)]
 
     if conference:
         teams_df = weight_by_conference(teams_df)
 
     if recruiting:
         teams_df = weight_by_recruiting(teams_df)
+
+    return teams_df
+
+
+def build_season_list(season: str) -> list[int]:
+    """
+    Generates a list of seasons
+
+    Parameters:
+        season: str
+            Can either be "all" which will return a list of the 10 previous seasons or 1 season in particular which will return just that season in a list
+    Returns:
+        The list of seasons
+    """
+    if season == "all":
+        season_list = range(datetime.now().year - 10, datetime.now().year - 1)
+    else:
+        season_list = [int(season)]
+
+    return season_list
+
+
+def get_elo_rankings(
+    season: str = "all",
+    conference: bool = False,
+    recruiting: bool = False,
+    margin_of_victory: bool = False,
+) -> DataFrame:
+    """
+    Ranks all college football teams by their elo rating
+
+    Parameters:
+        season: str = "all"
+            The season to get rankings for
+        conference: bool = False
+            Optionally weight elo by conference
+        recruiting: bool = False
+            Optionally weight elo by recruiting rank
+        margin_of_victory: bool = False
+            Optionally weight elo by margin of victory
+
+    Returns:
+        A dataframe containing all teams as ranked by elo
+
+    """
+    teams_df = build_teams_df(season, conference, recruiting)
+    season_list = build_season_list(season)
 
     elo_col = teams_df["Elo"].copy()
 
@@ -153,8 +280,6 @@ def get_elo_rankings(
         elo_rankings_df["Wins"] = 0
         elo_rankings_df["Losses"] = 0
 
-        elo_rankings_df["Elo"] = elo_col
-
         weeks = games_df.week.unique()
 
         for i in weeks:
@@ -165,18 +290,28 @@ def get_elo_rankings(
         # revert elo towards the mean
         # this is so past results aren't weighted as heavily as results from the current season
         # it also simulates player turnover, coach turnover, etc. between seasons
-        elo_col = revert_to_mean(elo_rankings_df["Elo"].copy())
+        elo_rankings_df["Elo"] = elo_rankings_df["Elo"].apply(
+            revert_to_mean, args=(elo_rankings_df["Elo"].mean(),)
+        )
 
     return elo_rankings_df
 
 
-def revert_to_mean(s):
-    mean = s.mean()
+def revert_to_mean(x: int, mean: float) -> float:
+    """
+    Takes a value and a mean and reverts the value part of the way towards the mean:
+        Formula: x +/- (0.7 * (diff_between x and mean))
+    Parameters:
+        x: int
+            the value
+        mean: float
+            the mean of the series x resides in
 
-    for idx, val in s.iteritems():
-        if val > mean:
-            s[idx] -= 0.7 * (val - mean)
-        else:
-            s[idx] += 0.7 * (mean - val)
+    Returns:
+        the new value of x after reverting towards mean
 
-    return s
+    """
+    if x > mean:
+        return x - (0.7 * (x - mean))
+    else:
+        return x + (0.7 * (mean - x))
